@@ -10,6 +10,7 @@ from .registry import ContractError, Registry
 from .release import ReleaseBuilder
 from .store import LedgerStore
 from .compare import Comparator, SeriesWindow
+from .adjudication import Adjudicator
 from .audit import AuditInspector
 from .coverage import CoverageReporter, BatchCoverage
 from .replay import ReplayInspector
@@ -31,6 +32,7 @@ class LedgerService:
         self.replay_inspector = ReplayInspector(self.store, self.registry)
         self.queue = ReviewQueue(self.store)
         self.receipts = ReceiptCatalog(self.store, self.registry)
+        self.adjudicator = Adjudicator(self.store, self.registry)
 
     def close(self) -> None:
         self.store.close()
@@ -130,6 +132,21 @@ class LedgerService:
 
     def discrepancies(self, version: int, indicator: str) -> dict[str, Any]:
         return self.coverage_reporter.discrepancy_report(version, indicator)
+
+    def conflicts(self, indicator: str, version: int | None = None) -> dict[str, Any]:
+        return self.adjudicator.conflicts(indicator, version)
+
+    def adjudicate(self, indicator: str, period: str, value: Any = None,
+                   reject: bool = False, rationale: str | None = None,
+                   version: int | None = None) -> dict[str, Any]:
+        return self.adjudicator.adjudicate(indicator, period, value=value, reject=reject,
+                                           rationale=rationale, version=version)
+
+    def external_series(self, indicator: str, version: int | None = None) -> dict[str, Any]:
+        return self.adjudicator.external_series(indicator, version)
+
+    def adjudications(self, indicator: str | None = None) -> list[dict[str, Any]]:
+        return self.adjudicator.adjudications(indicator)
 
     def replay(self, manifest_path: str | Path, batch_id: int) -> dict[str, Any]:
         return self.replay_inspector.compare_manifest(manifest_path, batch_id)

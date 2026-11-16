@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS release_entries (
     version INTEGER NOT NULL, source TEXT NOT NULL, indicator TEXT NOT NULL, period TEXT NOT NULL,
     batch_id INTEGER NOT NULL, line INTEGER NOT NULL, value TEXT NOT NULL, unit TEXT NOT NULL,
     PRIMARY KEY(version, source, indicator, period), FOREIGN KEY(version) REFERENCES releases(version));
+CREATE TABLE IF NOT EXISTS adjudications (
+    id INTEGER PRIMARY KEY, indicator TEXT NOT NULL, period TEXT NOT NULL,
+    release_version INTEGER NOT NULL, decision TEXT NOT NULL, rationale TEXT NOT NULL,
+    evidence TEXT NOT NULL, evidence_digest TEXT NOT NULL, decided_at TEXT NOT NULL,
+    FOREIGN KEY(indicator) REFERENCES indicators(key));
+CREATE INDEX IF NOT EXISTS adjudications_key ON adjudications(indicator, period, id);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL);
 """
@@ -194,6 +200,54 @@ class LedgerStore:
     def measurements(self, batch_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in self.connection.execute(
             "SELECT * FROM measurements WHERE batch_id=? ORDER BY line", (batch_id,))]
+
+    def insert_adjudication(self, indicator: str, period: str, release_version: int,
+                            decision: dict[str, Any], rationale: str,
+                            evidence: dict[str, Any], digest: str) -> dict[str, Any]:
+        encoded_decision = canonical_bytes(decision).decode()
+        with self.transaction():
+            existing = self.connection.execute(
+                "SELECT * FROM adjudications WHERE indicator=? AND period=? AND evidence_digest=? "
+                "AND decision=? AND rationale=?",
+                (indicator, period, digest, encoded_decision, rationale)).fetchone()
+            if existing is not None:
+                return self._adjudication(existing)
+            cursor = self.connection.execute(
+                "INSERT INTO adjudications(indicator,period,release_version,decision,rationale,"
+                "evidence,evidence_digest,decided_at) VALUES(?,?,?,?,?,?,?,?)",
+                (indicator, period, release_version, encoded_decision, rationale,
+                 canonical_bytes(evidence).decode(), digest, utc_now()))
+            adjudication_id = cursor.lastrowid
+            self.event("adjudicate", f"adjudication:{indicator}:{period}",
+                       {"id": adjudication_id, "decision": decision,
+                        "evidence_digest": digest, "release_version": release_version})
+            return self.adjudication(adjudication_id)
+
+    def adjudication(self, adjudication_id: int) -> dict[str, Any]:
+        row = self.connection.execute("SELECT * FROM adjudications WHERE id=?",
+                                      (adjudication_id,)).fetchone()
+        if row is None:
+            raise ContractError("unknown_adjudication", f"adjudication {adjudication_id} does not exist")
+        return self._adjudication(row)
+
+    def adjudications(self, indicator: str | None = None,
+                      period: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM adjudications"
+        args: tuple = ()
+        if indicator is not None and period is not None:
+            query += " WHERE indicator=? AND period=?"
+            args = (indicator, period)
+        elif indicator is not None:
+            query += " WHERE indicator=?"
+            args = (indicator,)
+        return [self._adjudication(row) for row in
+                self.connection.execute(query + " ORDER BY id", args)]
+
+    def _adjudication(self, row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        result["decision"] = json.loads(result["decision"])
+        result["evidence"] = json.loads(result["evidence"])
+        return result
 
     def current_measurement(self, source: str, indicator: str, period: str) -> dict[str, Any] | None:
         row = self.connection.execute(

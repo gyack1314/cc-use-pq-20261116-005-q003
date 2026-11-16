@@ -66,6 +66,21 @@ def parser() -> ArgumentParser:
     discrepancies = commands.add_parser("discrepancies")
     discrepancies.add_argument("version", type=int)
     discrepancies.add_argument("indicator")
+    conflicts = commands.add_parser("conflicts")
+    conflicts.add_argument("indicator")
+    conflicts.add_argument("--version", type=int)
+    adjudicate = commands.add_parser("adjudicate")
+    adjudicate.add_argument("indicator")
+    adjudicate.add_argument("period")
+    adjudicate.add_argument("--value")
+    adjudicate.add_argument("--reject", action="store_true")
+    adjudicate.add_argument("--rationale", required=True)
+    adjudicate.add_argument("--version", type=int)
+    external = commands.add_parser("external-series")
+    external.add_argument("indicator")
+    external.add_argument("--version", type=int)
+    adjudications = commands.add_parser("adjudications")
+    adjudications.add_argument("--indicator")
     replay = commands.add_parser("replay")
     replay.add_argument("manifest")
     replay.add_argument("batch", type=int)
@@ -178,6 +193,16 @@ def execute(args: Namespace) -> Any:
             return service.batch_coverage_report(args.batch)
         if args.command == "discrepancies":
             return service.discrepancies(args.version, args.indicator)
+        if args.command == "conflicts":
+            return service.conflicts(args.indicator, args.version)
+        if args.command == "adjudicate":
+            return service.adjudicate(args.indicator, args.period, value=args.value,
+                                      reject=args.reject, rationale=args.rationale,
+                                      version=args.version)
+        if args.command == "external-series":
+            return service.external_series(args.indicator, args.version)
+        if args.command == "adjudications":
+            return service.adjudications(args.indicator)
         if args.command == "replay":
             return service.replay(args.manifest, args.batch)
         if args.command == "pending-review":
